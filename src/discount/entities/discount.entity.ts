@@ -8,7 +8,9 @@ import {
     CreateDateColumn,
     UpdateDateColumn,
     Timestamp,
+    OneToMany,
   } from 'typeorm';
+import { DiscountUsageHistory } from './discountUsageHistory.entity';
 
   
   @Entity('discounts') // COLLECTION_NAME
@@ -25,7 +27,7 @@ import {
     @Column({ type: 'varchar', default: 'fixed_amount' })
     discount_type: string;
   
-    @Column({ type: 'decimal', nullable: false  ,precision:10,scale:2})
+    @Column({ type: 'decimal', nullable: false  ,precision:15,scale:2})
     discount_value: number;
   
     @Column({ type: 'varchar', nullable: false })
@@ -49,7 +51,7 @@ import {
     @Column({ type: 'int', nullable: false })
     discount_max_uses_per_users: number;
   
-    @Column({ type: 'decimal', nullable: false ,precision:10,scale:2})
+    @Column({ type: 'decimal', nullable: false ,precision:15,scale:2})
     discount_min_order_value: number;
   
     @ManyToOne(() => User, (user) => user.discounts, { eager: true, nullable: false })
@@ -66,11 +68,14 @@ import {
       })
     discount_applies_to: DsicountAppliesTo;
 
-    @Column()
+    @Column({type:'decimal',precision:15,scale:2,nullable:true})
     discount_max_value:number
   
     @Column({ type: 'simple-array', default: [] })
     discount_product_ids: string[]; 
+
+    @OneToMany(()=>DiscountUsageHistory , dis => dis.discount) 
+    discountHistory:DiscountUsageHistory
   
     @CreateDateColumn()
     createdAt: Timestamp;

@@ -1,5 +1,6 @@
 import { Comment } from "src/comment/entities/comment.entity";
 import { Discount } from "src/discount/entities/discount.entity";
+import { DiscountUsageHistory } from "src/discount/entities/discountUsageHistory.entity";
 import { Inventory } from "src/inventory/entities/inventory.entity";
 import { Product } from "src/product/entities/product.entity";
 import { Clothing } from "src/product/entities/subEntities/clothing.entity";
@@ -41,4 +42,6 @@ export class User {
     inventories:Inventory
     @OneToMany(()=>Discount,(discount)=>discount.discount_user)
     discounts:Discount[]
+    @OneToMany(()=>DiscountUsageHistory , (user)=>user.user)
+    discountHistory:DiscountUsageHistory
 }

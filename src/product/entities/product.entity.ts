@@ -52,8 +52,9 @@ export class Product {
   @Column({ type: 'boolean', default: false })
   isPublished: boolean;
 
-  @CreateDateColumn()
-  createdAt: Date;
+  @CreateDateColumn({ name: 'created_at' }) // Nếu tên cột trong cơ sở dữ liệu là created_at
+  createdAt: Date;  
+
 
   @UpdateDateColumn()
   updatedAt: Date

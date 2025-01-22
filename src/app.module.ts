@@ -29,7 +29,8 @@ import * as redisStore from 'cache-manager-redis-store'
       store:redisStore,
       host:'localhost',
       isGlobal:true,
-      port:6379
+      port:6379,
+      ttl:300
     }),
     InventoryModule,
     DiscountModule
