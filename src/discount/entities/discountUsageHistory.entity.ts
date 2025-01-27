@@ -7,12 +7,12 @@ export class DiscountUsageHistory {
 
     @PrimaryGeneratedColumn()
     id:number
-    @ManyToOne(() => Discount, (discount) => discount.discountHistory, { eager: true, nullable: false })
+    @ManyToOne(() => Discount, (discount) => discount.discountHistory, { eager: true, nullable: false ,onDelete:'CASCADE'})
     discount: Discount;
   
-    @ManyToOne(()=>User , (abc) => abc.discountHistory,{eager:true,nullable:false})
+    @ManyToOne(()=>User , (abc) => abc.discountHistory,{eager:true,nullable:false,onDelete:'CASCADE'},)
     user:User
-    @Column({type:'decimal',precision:10,scale:2})
+    @Column({type:'decimal',precision:10,scale:2,})
     discount_amount:number
     @Column({type:'decimal',precision:10,scale:2})
     order_total:number

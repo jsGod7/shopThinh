@@ -208,18 +208,10 @@ export class DiscountService {
     return products
   }
   async deleteDiscountCode({userId,codeId}:{userId:number,codeId:string}) {
-    const deleteDiscount = await this.discountRepository.findOne({
-      where:{
-        discount_code:codeId,
-        discount_user:{id:userId}
-      }
-    })
-    if(!deleteDiscount) throw new NotFoundException('Discount not found')
-    await this.discountRepository.remove(deleteDiscount)
-  return {
-    success:true,
-    deleteDiscount
-  }
+    const discount = await this.foundDiscount({codeId,userId})
+    return this.discountRepository.remove(discount)
+    
+    
     
   }
   async getDiscountAmount({
@@ -297,11 +289,11 @@ export class DiscountService {
       const userUsageCount = discount_users_used.filter(
         user => user === userId.toString(),
       ).length;
-      // if (userUsageCount >= discount_max_uses_per_users) {
-      //   throw new BadRequestException(
-      //     `You have reached the maximum usage limit for this discount`,
-      //   );
-      // }
+      if (userUsageCount >= discount_max_uses_per_users) {
+        throw new BadRequestException(
+          `You have reached the maximum usage limit for this discount`,
+        );
+      }
       let discountAmount = 0;
       if (discount_type === 'fixed_amount') {
         discountAmount = discount_value;
@@ -343,6 +335,61 @@ export class DiscountService {
     }
 
   }
+  async getAllDiscountCodesByShop({
+    limit,page,userId
+  })
+  {
+    const skip = (page -1 ) * limit
+    const [discounts, total] = await this.discountRepository.findAndCount({
+      where: {
+        discount_user: userId, 
+        discount_is_active: true, 
+      },
+      skip,
+      take: limit,
+      select: {
+        id: true,
+        discount_name: true,
+        discount_description: true,
+        discount_type: true,
+        discount_value: true,
+        discount_code: true,
+        discount_start_date: true,
+        discount_end_date: true,
+        discount_is_active: true,
+      },
+    });
+  
+    return {
+      total,
+      page,
+      limit,
+      discounts,
+    };
+  }
+  async findOneDiscount(codeId:string) {
+    const cacheKey = `discount_${codeId}`
+    let discount = await this.cacheManager.get<Discount>(cacheKey)
+    if(!discount) {
+      discount = await this.discountRepository.findOne({
+        where:{discount_code:codeId,discount_is_active:true},
+        relations:['discount_user']
+      })
+      if(!discount) throw new NotFound()
+      await this.cacheManager.set(cacheKey,discount,300)
+    }  
+    return discount
+  }
+  async applyDiscount({codeId , userId , products}) {
+    const discount = await this.discountRepository.findOne({ where: { discount_code: codeId } });
+    if (!discount) return { totalPrice: 0, discount: 0 };
+    const discountAmount = products.reduce((total, product) => {
+      return total + (product.price * products.quantity) / 100;
+    }, 0);
+    return {totalPrice:discountAmount , discount:discountAmount}
+
+  }
+
 
   
   private removeUndefinedObject(obj: Record<string, any>): Record<string, any> {
@@ -359,10 +406,14 @@ export class DiscountService {
     }
   private  async foundDiscount({codeId,userId}) {
     const discount = await this.discountRepository.findOne({
-      where:{discount_code:codeId,discount_user:{id:userId}}
+      where:{discount_code:codeId,discount_user:{id:userId}},
+      relations:['discount_user']
     })
+    if(!discount) throw new NotFound()
     return discount
   }
+
+
 
 
     

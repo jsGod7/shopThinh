@@ -4,7 +4,7 @@ import { CreateDiscountDto } from './dto/create-discount.dto';
 import { UpdateDiscountDto } from './dto/update-discount.dto';
 import { Discount } from './entities/discount.entity';
 import { CacheInterceptor } from '@nestjs/cache-manager';
-import { BadRequest } from 'src/util/handleError/handleError';
+import { BadRequest, NotFound } from 'src/util/handleError/handleError';
 
 @Controller('discount')
 export class DiscountController {
@@ -62,6 +62,34 @@ export class DiscountController {
     @Param('codeId') codeId: string,
   ) {
     return this.discountService.deleteDiscountCode({ userId, codeId });
+  }
+ 
+  @UseInterceptors(CacheInterceptor)
+  @Get('shop-discounts')
+  async getAllDiscountCodesByShop(
+    @Query('userId') userId: number,
+    @Query('limit') limit: string,
+    @Query('page') page: string,
+  ) {
+    
+    const limitValue = limit ? parseInt(limit,10) : 10
+    const pageValue = page ? parseInt(limit,10) : 1
+    return this.discountService.getAllDiscountCodesByShop({limit:limitValue,page:pageValue,userId})
+  }
+  @Patch(':codeId/:userId')
+  async cancelDiscount(
+    @Param('codeId') codeId:string,
+    @Param('userId') userId:number
+  ) {
+    if(!userId || !codeId) throw new NotFound()
+    return this.discountService.cancelDiscountCode({codeId,userId})
+  }
+
+  @Get(':codeId')
+  @UseInterceptors(CacheInterceptor)
+  async findOneDiscount(@Param('codeId') codeId:string) {
+    const res = await this.discountService.findOneDiscount(codeId)
+    return res
   }
 
   

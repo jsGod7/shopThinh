@@ -8,6 +8,7 @@ import { Clothing } from './subEntities/clothing.entity';
 import { Furniture } from './subEntities/furniture.entity';
 import { Comment } from 'src/comment/entities/comment.entity';
 import { Inventory } from 'src/inventory/entities/inventory.entity';
+import { CartProduct } from 'src/cart/entities/cartProduct.entity';
 
 @Entity('products')
 export class Product {
@@ -76,6 +77,10 @@ export class Product {
 
   @OneToMany(()=>Inventory , (inven) => inven.inven_product)
   inventories:Inventory
+
+  @OneToMany(()=>CartProduct,abc => abc.product)
+  cartProducts:CartProduct
+ 
 
 
 
