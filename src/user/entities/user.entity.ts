@@ -49,5 +49,5 @@ export class User {
     @OneToMany(()=>Cart , cart => cart.user)
     carts:Cart[]
     @OneToMany(()=> Order , order => order.user)
-    orders:Order
+    orders:Order[]
 }
