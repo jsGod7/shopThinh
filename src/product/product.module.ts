@@ -11,11 +11,22 @@ import { ProductController } from './product.controller';
 import { ProductStrategyFactory } from './pattern/product-strategy.factory';
 import { ProductService } from './product.service';
 import { StrategyFactoryService } from './pattern/updateProduct/strategy-factory..updateProduct.service';
-import { Inventory } from 'src/inventory/entities/inventory.entity';
+import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq';
+import { RedisModule } from 'src/redis/redis.module';
 
 
 @Module({
-  imports:[TypeOrmModule.forFeature([Product, Electronic, Furniture, Clothing , Inventory])
+  imports:[TypeOrmModule.forFeature([Product, Electronic, Furniture, Clothing ]),
+  RabbitMQModule.forRoot({
+    exchanges: [
+      { name: 'product_exchange', type: 'topic' },
+    ],
+    uri:'amqp://guest:guest@localhost:5672',
+    enableControllerDiscovery:true,
+    
+    
+
+  }), RedisModule
 ],
   controllers: [ProductController],
   providers: [ProductStrategyFactory , ElectronicStrategy , ClothingStrategy , FurnitureStrategy ,ProductService,StrategyFactoryService],

@@ -4,14 +4,19 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductStrategyFactory } from './pattern/product-strategy.factory';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Product } from './entities/product.entity';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { UpdateStatusProductDto } from './dto/update-productStatus.dto';
 import { SearchProductDto } from './dto/search-product.dto';
+import { AmqpConnection, RabbitSubscribe } from '@golevelup/nestjs-rabbitmq';
+import { RedisService } from 'src/redis/redis.service';
 
 @Injectable()
 export class ProductService {
   constructor(
-    @InjectRepository(Product) private readonly productRepository:Repository<Product>
+    @InjectRepository(Product) private readonly productRepository:Repository<Product>,
+    private readonly amqpConnection:AmqpConnection,
+    private readonly redisService:RedisService,
+    private readonly dataSource:DataSource
   ){}
 
   async updateStatus(id:number,updateStatusProductDto:UpdateStatusProductDto) {
@@ -74,6 +79,51 @@ export class ProductService {
     return product
     
   }
+ 
+  @RabbitSubscribe({
+    exchange: 'product_exchange',
+    routingKey: 'update_product_quantity',
+    queue: 'product_queue',
+    allowNonJsonMessages:false,
+    createQueueIfNotExists:true
+})
+async updateProductQuantity(msg: { productId: number; stock: number }) {
+  console.log(`📩 Nhận sự kiện update_product_quantity: ${JSON.stringify(msg)}`);
+
+  const { productId, stock } = msg;
+
+  if (!productId || isNaN(productId) || stock === undefined || isNaN(stock)) {
+      console.error(`🚨 Dữ liệu không hợp lệ: productId=${productId}, stock=${stock}`);
+      throw new Error(`Invalid input data: productId=${productId}, stock=${stock}`);
+  }
+
+  const product = await this.productRepository.findOne({ where: { id: productId } });
+
+  if (!product) {
+      console.error(`🚨 Sản phẩm ${productId} không tồn tại`);
+      return;
+  }
+
+  if(stock < 0){ 
+    console.error(`giá trị tồn kho không hợp lệ  ${productId}:${stock}`)
+    return
+  }
+  const updateResult = await this.productRepository.update(productId,{product_quantity:stock})
+  if(updateResult.affected === 0 ) {
+    console.error(`không thể cập nhật tồn kho cho sản phẩm ${productId}`)
+    return
+  }
+
+
+
+  console.log(`✅ Đã cập nhật tồn kho cho sản phẩm ${productId}: còn lại ${stock}`);
+}
+
+
+
+
+
+
 
   async deleteProduct(id: number): Promise<{ message: string }> {
     const product = await this.productRepository.findOne({ where: { id } });

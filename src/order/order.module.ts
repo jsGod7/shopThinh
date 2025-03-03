@@ -10,9 +10,18 @@ import { User } from 'src/user/entities/user.entity';
 import { OrderProduct } from './entities/orderProduct.entity';
 import { Order } from './entities/order.entity';
 import { RedisModule } from 'src/redis/redis.module';
+import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq';
 
 @Module({
-  imports:[TypeOrmModule.forFeature([Cart,Discount , Product , User , OrderProduct , Order]),RedisModule],
+  imports:[TypeOrmModule.forFeature([Cart,Discount , Product , User , OrderProduct , Order]),RedisModule,
+   RabbitMQModule.forRoot({
+      exchanges: [
+        { name: 'notifications_exchange', type: 'topic' },
+      ],
+      uri:'amqp://guest:guest@localhost:5672',
+      enableControllerDiscovery:true,
+    }),
+  ],
   controllers: [OrderController],
   providers: [OrderService],
   exports:[OrderService]

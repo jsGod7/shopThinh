@@ -1,4 +1,4 @@
-import { MiddlewareConsumer, Module, RequestMethod } from '@nestjs/common';
+import { Global, MiddlewareConsumer, Module, RequestMethod } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -12,12 +12,12 @@ import { ProductModule } from './product/product.module';
 import { CommentModule } from './comment/comment.module';
 import { CacheModule } from '@nestjs/cache-manager';
 import { RedisModule } from './redis/redis.module';
-import { InventoryModule } from './inventory/inventory.module';
 import { DiscountModule } from './discount/discount.module';
 import { CartModule } from './cart/cart.module';
 import { OrderModule } from './order/order.module';
 import * as redisStore from 'cache-manager-redis-store'
-
+import { ClientsModule, Transport } from '@nestjs/microservices';
+// @@Global()
 @Module({
   imports:[
     TypeOrmModule.forRoot(dataSourceOptions),
@@ -34,10 +34,10 @@ import * as redisStore from 'cache-manager-redis-store'
       port:6379,
       ttl:300
     }),
-    InventoryModule,
     DiscountModule,
     CartModule,
     OrderModule,
+    
     
   ],
   controllers: [AppController],

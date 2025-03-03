@@ -33,15 +33,7 @@ export class EmailService {
             console.error(error)
         }
     }
-    async updateUser(email:string) {
-        const mailOptions = {
-            from:process.env.EMAIL_USERNAME,
-            to:email,
-            subject:'cập nhật tài khoản',
-            html:`<p> tài khoản của bạn vừa được cập nhật </p>` 
-        }
-        await this.transporter.sendMail(mailOptions)
-    }
+    
     async sendMailResetPassword(email:string,resetToken:string) {
         const mailOptions = {
             from:process.env.EMAIL_USERNAME,

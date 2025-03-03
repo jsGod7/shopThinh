@@ -17,43 +17,25 @@ export class RedisService {
         console.log('failed',error)
     })
    }
-   async getProductStock(productId: string): Promise<string> {
-    try {
-      const stock = await this.client.get(productId);
-      return stock || '0';  // Trả về '0' nếu không tìm thấy
-    } catch (error) {
-      console.error("Error khi lấy tồn kho từ Redis:", error);
-      throw new Error("Không thể truy xuất tồn kho từ Redis");
-    }
+   async getProductStock(productId: string): Promise<number> {
+    const stock = await this.client.get(`stock:${productId}`);
+    return stock ? parseInt(stock, 10) : 0;
   }
-  
+
+  // Cập nhật tồn kho trong Redis
   async updateProductStock(productId: string, stock: number): Promise<void> {
-    await this.client.set(productId, stock.toString());
+    await this.client.set(`stock:${productId}`, stock.toString());
   }
-  
-  // Khóa tồn kho sản phẩm trong Redis
-async lockProductStock(productId: string): Promise<boolean> {
-  const lockKey = `lock:${productId}`;
-  
-  // Sử dụng SETNX để chỉ đặt giá trị nếu khóa chưa tồn tại
-  const result = await this.client.set(lockKey, 'locked', 'EX', 60);  // 'EX' đặt thời gian hết hạn là 60 giây
 
-  return result === 'OK';  // Nếu khóa được đặt thành công, trả về 'OK'
-}
+  // Đặt khóa khi sản phẩm đang được xử lý
+  async lockProductStock(productId: string): Promise<boolean> {
+    const lock = await this.client.set(`lock:${productId}`, 'locked', 'EX', 10); // Thời gian khóa là 10 giây
+    return lock === 'OK';
+  }
 
-
+  // Mở khóa sau khi xử lý xong
   async unlockProductStock(productId: string): Promise<void> {
-    await this.client.del(productId);
-  }
-  async setProductStock(productId: string, stock: number): Promise<void> {
-    try {
-      // Lưu trữ số lượng tồn kho vào Redis
-      await this.client.set(productId, stock.toString());
-      console.log(`Cập nhật tồn kho cho sản phẩm ${productId}: ${stock}`);
-    } catch (error) {
-      console.error("Error khi set tồn kho cho sản phẩm:", error);
-      throw new Error("Không thể cập nhật tồn kho vào Redis");
-    }
+    await this.client.del(`lock:${productId}`);
   }
   
   

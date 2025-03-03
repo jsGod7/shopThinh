@@ -2,7 +2,6 @@ import { Cart } from "src/cart/entities/cart.entity";
 import { Comment } from "src/comment/entities/comment.entity";
 import { Discount } from "src/discount/entities/discount.entity";
 import { DiscountUsageHistory } from "src/discount/entities/discountUsageHistory.entity";
-import { Inventory } from "src/inventory/entities/inventory.entity";
 import { Order } from "src/order/entities/order.entity";
 import { Product } from "src/product/entities/product.entity";
 import { Clothing } from "src/product/entities/subEntities/clothing.entity";
@@ -40,8 +39,6 @@ export class User {
     clothing:Clothing[]
     @OneToMany(()=> Comment, (comment) => comment.user)
     comments:Comment[]
-    @OneToMany(()=>Inventory,(inven)=>inven.inven_user)
-    inventories:Inventory
     @OneToMany(()=>Discount,(discount)=>discount.discount_user)
     discounts:Discount[]
     @OneToMany(()=>DiscountUsageHistory , (user)=>user.user)

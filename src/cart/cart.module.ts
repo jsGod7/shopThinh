@@ -5,9 +5,11 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Cart } from './entities/cart.entity';
 import { Product } from 'src/product/entities/product.entity';
 import { CartProduct } from './entities/cartProduct.entity';
+import { RedisService } from 'src/redis/redis.service';
+import { RedisModule } from 'src/redis/redis.module';
 
 @Module({
-  imports:[TypeOrmModule.forFeature([Cart,Product,CartProduct])],
+  imports:[TypeOrmModule.forFeature([Cart,Product,CartProduct]),RedisModule],
   controllers: [CartController],
   providers: [CartService],
   exports:[CartService]

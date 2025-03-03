@@ -6,14 +6,14 @@ import { Product } from "../entities/product.entity";
 import { CreateProductDto } from "../dto/create-product.dto";
 import { ProductType } from "src/util/common/product.type.enum";
 import { ProductStrategy } from "./product-strategy.interface";
-import { Inventory } from "src/inventory/entities/inventory.entity";
+import { AmqpConnection } from "@golevelup/nestjs-rabbitmq";
 
 @Injectable()
 export class ElectronicStrategy implements ProductStrategy {
     constructor(
         @InjectRepository(Electronic) private readonly electronicRepository:Repository<Electronic>,
         @InjectRepository(Product) private readonly productRepository:Repository<Product>,
-        @InjectRepository(Inventory) private readonly inventoryRepository:Repository<Inventory>
+        private readonly anqoConnection:AmqpConnection
     ) {}
     async createProduct(dto: CreateProductDto): Promise<any> {
         const product = this.productRepository.create({
@@ -27,12 +27,13 @@ export class ElectronicStrategy implements ProductStrategy {
             electroncProduct:product
         })
         const saveItem = await this.electronicRepository.save(electronic)
-        const inventory = this.inventoryRepository.create({
-            inven_product:saveProduct,
-            inven_stock:dto.product_quantity || 0 ,
-            inven_location:dto.product_location || 'unknown'
-          })
-          await this.inventoryRepository.save(inventory)
+        await this.anqoConnection.publish('inventory_exchange','inventory_create',
+            {
+                productId: saveProduct.id,
+                quantity: dto.product_quantity || 0,
+                location: dto.product_location || "unknown",
+            }
+          ) 
         return saveItem
     }
     

@@ -1,7 +1,7 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, OnModuleInit, ConflictException } from '@nestjs/common';
 import { Cart } from 'src/cart/entities/cart.entity';
 import { Discount } from 'src/discount/entities/discount.entity';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { CheckoutReviewDto } from './dto/checkout.order.dto';
 import { OrderProduct } from './entities/orderProduct.entity';
@@ -10,9 +10,12 @@ import { Product } from 'src/product/entities/product.entity';
 import { OrderPlaceDto } from './dto/place.order.dto';
 import { User } from 'src/user/entities/user.entity';
 import { RedisService } from 'src/redis/redis.service';
+import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
+import { NotFound } from 'src/util/handleError/handleError';
+import { CartProduct } from 'src/cart/entities/cartProduct.entity';
 
 @Injectable()
-export class OrderService {
+export class OrderService  implements OnModuleInit{
   constructor(
     @InjectRepository(Cart) private readonly cartRepository: Repository<Cart>,
     @InjectRepository(Discount) private readonly discountRepository: Repository<Discount>,
@@ -20,210 +23,240 @@ export class OrderService {
     @InjectRepository(OrderProduct) private readonly orderProductRepository: Repository<OrderProduct>,
     @InjectRepository(Product) private readonly productRepository: Repository<Product>,
     @InjectRepository(User) private readonly userRepository: Repository<User>,
+    private readonly amqpConnection:AmqpConnection,
+    private readonly dataSource:DataSource,
     private readonly redisService:RedisService
 
-  ) {}
-  async orderPlace(payload: OrderPlaceDto) {
-    const { userId, cartId, discountCode, shippingInfo } = payload;
-  
-    // Bước 1: Kiểm tra giỏ hàng
-    const cart = await this.cartRepository.findOne({
-      where: { id: cartId, user: { id: userId } },
-      relations: ['cartProducts', 'cartProducts.product'],
-    });
-  
-    if (!cart || cart.cartProducts.length === 0) {
-      throw new NotFoundException('Giỏ hàng không tồn tại hoặc rỗng');
+  ) {
+    console.log('📡 Kết nối RabbitMQ:', amqpConnection ? 'Thành công' : 'Thất bại');
+
+  }
+  async sync() {
+    const product  = await this.productRepository.find()
+    for(const item of product) {
+      await this.redisService.client.set(`inventory:${item.id}`,item.product_quantity)
+
     }
-  
-    // Bước 2: Tính tổng giá trị giỏ hàng
-    const cartItems = cart.cartProducts.map((item) => {
-      const { product, quantity } = item;
-      const price = product.product_price;
-      const totalItemPrice = price * quantity;
-  
-      return {
-        productId: product.id,
-        productName: product.product_name,
-        quantity,
-        price,
-        totalItemPrice,
-      };
-    });
-  
-    const totalPrice = cartItems.reduce((acc, item) => acc + item.totalItemPrice, 0);
-  
-    let discountValue = 0;
-    if (discountCode) {
-      const discount = await this.discountRepository.findOne({
-        where: { discount_code: discountCode, discount_is_active: true },
-      });
-  
-      if (!discount) {
-        throw new BadRequestException('Mã giảm giá không hợp lệ');
-      }
-  
-      discountValue =
-        discount.discount_type === 'fixed_amount'
-          ? discount.discount_value
-          : (totalPrice * discount.discount_value) / 100;
-  
-      if (discount.discount_max_value) {
-        discountValue = Math.min(discountValue, discount.discount_max_value);
-      }
-  
-      discount.discount_is_active = false;
-      await this.discountRepository.save(discount);
-    }
-  
-    const totalCheckout = totalPrice - discountValue;
-  
-    // Bước 3: Kiểm tra tồn kho và khóa
-    for (const item of cartItems) {
-      const isLocked = await this.redisService.lockProductStock(item.productId.toString());
-      
-      if (!isLocked) {
-        throw new BadRequestException(
-          `Sản phẩm "${item.productName}" đang được xử lý, vui lòng thử lại sau.`
-        );
-      }
-  
-      // Lấy tồn kho từ Redis và chuyển đổi thành kiểu số
-      const availableStockStr = await this.redisService.getProductStock(item.productId.toString());
-      const availableStock = parseInt(availableStockStr, 10); // Chuyển đổi thành số
-  
-      // Kiểm tra nếu tồn kho không đủ
-      if (availableStock < item.quantity) {
-        await this.redisService.unlockProductStock(item.productId.toString()); // Giải phóng khóa
-        throw new BadRequestException(
-          `Sản phẩm "${item.productName}" không đủ số lượng trong kho. Tồn kho hiện tại: ${availableStock}`
-        );
-      }
-    }
-  
-    // Bước 4: Tạo đơn hàng
-    const order = this.orderRepository.create({
-      user: { id: userId },
-      totalPrice,
-      status: 'pending',
-      shippingInfo: shippingInfo || {},
-      trackingNumber: null,
-    });
-    const savedOrder = await this.orderRepository.save(order);
-  
-    // Bước 5: Lưu chi tiết đơn hàng và cập nhật tồn kho
-    for (const item of cartItems) {
-      const product = await this.productRepository.findOne({
-        where: { id: item.productId },
-      });
-  
-      if (!product) {
-        throw new NotFoundException(`Không tìm thấy sản phẩm ID: ${item.productId}`);
-      }
-  
-      const orderProduct = this.orderProductRepository.create({
-        order: savedOrder,
-        product,
-        quantity: item.quantity,
-        price: item.price,
-      });
-  
-      await this.orderProductRepository.save(orderProduct);
-  
-      // Cập nhật lại tồn kho trong Redis
-      const availableStockStr = await this.redisService.getProductStock(item.productId.toString());
-      const availableStock = parseInt(availableStockStr, 10); // Chuyển đổi thành số
-      const newStock = availableStock - item.quantity;
-  
-      // Cập nhật tồn kho mới trong Redis
-      if (newStock < 0) {
-        throw new BadRequestException(`Tồn kho không đủ cho sản phẩm "${item.productName}"`);
-      }
-  
-      await this.redisService.updateProductStock(item.productId.toString(), newStock);
-    }
-  
-    // Bước 6: Giải phóng khóa sản phẩm
-    for (const item of cartItems) {
-      await this.redisService.unlockProductStock(item.productId.toString());
-    }
-  
-    // Bước 7: Xóa giỏ hàng
-    cart.cartProducts = [];
-    await this.cartRepository.save(cart);
-  
-    // Bước 8: Trả về kết quả
-    return {
-      orderId: savedOrder.id,
-      totalPrice,
-      discountValue,
-      totalCheckout,
-      status: savedOrder.status,
-    };
+    console.log('✅ Synchronized inventory data to Redis')
+
+  }
+  onModuleInit() {
+    this.sync()  
   }
   
-  
-  async checkoutReview(payload: CheckoutReviewDto) {
-    const { userId, cartId, discountCode } = payload;
+  async orderPlace(payload: OrderPlaceDto) {
+    const { userId, cartId, discountCode, shippingInfo } = payload;
 
-    const cart = await this.cartRepository.findOne({
+    return this.dataSource.transaction(async (manager) => {
+        const user = await manager.findOne(User, { where: { id: userId }, select: ['id', 'email'] });
+        if (!user) throw new NotFoundException('Người dùng không tồn tại');
+
+        const cart = await manager.findOne(Cart, {
+            where: { id: cartId, user: { id: userId } },
+            relations: ['cartProducts', 'cartProducts.product'],
+        });
+        if (!cart || cart.cartProducts.length === 0) throw new NotFoundException('Giỏ hàng trống');
+
+        const cartItems = cart.cartProducts.map((item) => ({
+            productId: item.product.id,
+            productName: item.product.product_name,
+            quantity: item.quantity,
+            price: item.product.product_price,
+        }));
+
+        let totalPrice = cartItems.reduce((acc, item) => acc + item.quantity * item.price, 0);
+
+        let discountValue = 0;
+        if (discountCode) {
+            const discount = await manager.findOne(Discount, { where: { discount_code: discountCode, discount_is_active: true } });
+            if (!discount) throw new BadRequestException('Mã giảm giá không hợp lệ');
+
+            discountValue = discount.discount_type === 'fixed_amount'
+                ? discount.discount_value
+                : (totalPrice * discount.discount_value) / 100;
+
+            discountValue = Math.min(discountValue, discount.discount_max_value || discountValue);
+
+            discount.discount_is_active = false;
+            await manager.save(discount);
+        }
+
+        const totalCheckout = totalPrice - discountValue;
+
+        for (const item of cartItems) {
+            const key = `inventory:${item.productId}`;
+            await this.redisService.client.watch(key);
+            const stock = await this.redisService.client.get(key);
+            const availableStock = stock ? parseInt(stock) : 0;
+
+            console.log(availableStock, "avai")
+            console.log(stock, "stock")
+            if (availableStock < item.quantity) {
+                await this.redisService.client.unwatch();
+                throw new BadRequestException(`Sản phẩm ${item.productId} không đủ hàng`);
+            }
+
+            const newStock = availableStock - item.quantity;
+            const result = await this.redisService.client
+                .multi()
+                .set(key, newStock)
+                .exec();
+
+            console.log('result',result)
+            if (!result) {
+
+                await this.redisService.client.unwatch()
+                throw new ConflictException('Đã có lỗi khi cập nhật tồn kho, vui lòng thử lại');
+            }
+
+            console.log('chưa gửi data')
+            await this.amqpConnection.publish(
+                'inventory_exchange',
+                'update_inventory',
+                {
+                    productId: item.productId,
+                    quantity: item.quantity,
+                }
+            );
+            console.log('đã gửi' ,{productId:item.productId,quantity:item.quantity})
+            console.log('RabbitMQ status:', this.amqpConnection.managedConnection.isConnected);
+
+
+        }
+
+        const order = manager.create(Order, {
+            user,
+            totalPrice,
+            status: 'pending',
+            shippingInfo,
+            trackingNumber: null,
+        });
+        const savedOrder = await manager.save(order);
+        if(discountCode) {
+          await this.amqpConnection.publish(
+            'discount_exchange',
+            'update_discount_usage',
+            {discountCode,userId}
+          )
+        }
+
+
+        await this.amqpConnection.publish(
+            'notifications_exchange',
+            'send_mail_createOrder',
+            {
+                userId: user.id,
+                email: user.email,
+                orderId: savedOrder.id,
+                totalCheckout,
+                status: savedOrder.status,
+            }
+        );
+
+        
+        await manager.createQueryBuilder()
+        .delete()
+        .from(CartProduct)
+        .where('cartId = :cartId',{cartId})
+        .execute()
+        await manager.save(cart)
+
+        return {
+            orderId: savedOrder.id,
+            totalPrice,
+            discountValue,
+            totalCheckout,
+            status: savedOrder.status,
+        };
+    });
+}
+
+async checkoutReview(payload: CheckoutReviewDto) {
+  const { userId, cartId, discountCode } = payload;
+
+  const cart = await this.cartRepository.findOne({
       where: { id: cartId, user: { id: userId } },
-      relations: ['cartProducts', 'cartProducts.product'], 
-    });
+      relations: ['cartProducts', 'cartProducts.product'],
+  });
 
-    if (!cart || cart.cartProducts.length === 0) {
+  if (!cart || cart.cartProducts.length === 0) {
       throw new NotFoundException('Giỏ hàng không tồn tại hoặc rỗng');
-    }
+  }
 
-    const cartItems = cart.cartProducts.map((item) => {
-      const { product, quantity } = item;
-      const price = product.product_price;
-      const totalItemPrice = price * quantity;
+  const cartItems = cart.cartProducts.map((item) => ({
+      productId: item.product.id,
+      productName: item.product.product_name,
+      quantity: item.quantity,
+      price: item.product.product_price,
+  }));
 
-      return {
-        productId: product.id,
-        productName: product.product_name,
-        quantity,
-        price,
-        totalItemPrice,
-      };
-    });
+  let totalPrice = cartItems.reduce((acc, item) => acc + item.quantity * item.price, 0);
 
-    const totalPrice = cartItems.reduce((acc, item) => acc + item.totalItemPrice, 0);
+  // **Kiểm tra tồn kho bằng Redis**
+  for (const item of cartItems) {
+      const key = `inventory:${item.productId}`;
+      await this.redisService.client.watch(key); // Theo dõi key tránh race condition
+      const stock = await this.redisService.client.get(key);
+      const availableStock = stock ? parseInt(stock) : 0;
 
-    let discountValue = 0;
-    if (discountCode) {
+      console.log(`Sản phẩm ${item.productId}: Tồn kho hiện tại: ${availableStock}, Cần: ${item.quantity}`);
+
+      if (availableStock < item.quantity) {
+          await this.redisService.client.unwatch();
+          throw new BadRequestException(`Sản phẩm ${item.productId} không đủ hàng trong kho`);
+      }
+
+      await this.redisService.client.unwatch(); // Bỏ theo dõi sau khi kiểm tra xong
+  }
+
+  // **Kiểm tra mã giảm giá**
+  let discountValue = 0;
+  if (discountCode) {
       const discount = await this.discountRepository.findOne({
-        where: { discount_code: discountCode, discount_is_active: true },
+          where: { discount_code: discountCode, discount_is_active: true },
       });
 
       if (!discount) {
-        throw new BadRequestException('Mã giảm giá không hợp lệ');
+          throw new BadRequestException('Mã giảm giá không hợp lệ');
       }
 
       if (totalPrice < discount.discount_min_order_value) {
-        throw new BadRequestException('Giá trị đơn hàng không đạt điều kiện áp dụng mã giảm giá');
+          throw new BadRequestException('Giá trị đơn hàng không đạt điều kiện áp dụng mã giảm giá');
       }
 
       discountValue =
-        discount.discount_type === 'fixed_amount'
-          ? discount.discount_value
-          : (totalPrice * discount.discount_value) / 100;
+          discount.discount_type === 'fixed_amount'
+              ? discount.discount_value
+              : (totalPrice * discount.discount_value) / 100;
 
       if (discount.discount_max_value) {
-        discountValue = Math.min(discountValue, discount.discount_max_value);
+          discountValue = Math.min(discountValue, discount.discount_max_value);
       }
-    }
 
-    const totalCheckout = totalPrice - discountValue;
+      // Gửi thông báo cập nhật mã giảm giá
+      await this.amqpConnection.publish('discount_exchange', 'update_discount_usage', {
+          discountId: discount.id,
+          userID:userId,
+      });
+  }
 
-    return {
+  const totalCheckout = totalPrice - discountValue;
+
+  return {
       cartItems,
       totalPrice,
       discountValue,
       totalCheckout,
-    };
-  }
+  };
+}
+
+
+  
+
+  
+
+ 
+  
   async getAllOrder(orderId:number) {
     const order = await this.orderRepository.findOne({
       where:{id:orderId},
@@ -242,7 +275,6 @@ export class OrderService {
     return save
   }
   async cancelOrder(orderId: number) {
-    // Tìm đơn hàng và load các quan hệ cần thiết
     const order = await this.orderRepository.findOne({
       where: { id: orderId  , status:'pending'},
       relations: ['orderProducts', 'orderProducts.product'],
@@ -252,10 +284,8 @@ export class OrderService {
       throw new NotFoundException(`Không tìm thấy đơn hàng với ID: ${orderId}`);
     }
   
-    // Log trạng thái đơn hàng trước khi kiểm tra
     console.log('Current order status before check:', order.status);
   
-    // Kiểm tra trạng thái của đơn hàng
     if (order.status === 'delivered') {
       throw new BadRequestException('Không thể hủy đơn hàng đã giao');
     }
@@ -265,16 +295,13 @@ export class OrderService {
       throw new BadRequestException('Đơn hàng đã hủy, không thể hủy lại');
     }
   
-    // Cập nhật trạng thái đơn hàng thành 'cancelled'
     order.status = 'cancelled';
     const updatedOrder = await this.orderRepository.save(order);
   
-    // Log trạng thái đơn hàng sau khi cập nhật
     console.log('Order status after update:', updatedOrder.status);
   
-    // Hoàn lại hàng hóa vào kho (nếu cần thiết)
     for (const orderProduct of updatedOrder.orderProducts) {
-      console.log('Order Product:', orderProduct); // Log để kiểm tra
+      console.log('Order Product:', orderProduct);
   
       if (!orderProduct.product) {
         throw new BadRequestException(`Sản phẩm trong đơn hàng không hợp lệ`);
@@ -288,12 +315,10 @@ export class OrderService {
         throw new NotFoundException(`Không tìm thấy sản phẩm với ID: ${orderProduct.product.id}`);
       }
   
-      // Cập nhật lại số lượng sản phẩm trong kho
       product.product_quantity += orderProduct.quantity;
       await this.productRepository.save(product);
     }
   
-    // Trả về đơn hàng đã được cập nhật
     return updatedOrder;
   }
   

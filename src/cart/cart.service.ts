@@ -3,10 +3,11 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Product } from "src/product/entities/product.entity";
 import { CartItemStatus } from "src/util/common/cartItemStatus.type.enum";
 import { BadRequest, NotFound } from "src/util/handleError/handleError";
-import { DataSource, Repository } from "typeorm";
+import { DataSource, JsonContains, Repository } from "typeorm";
 import { Cart } from "./entities/cart.entity";
 import { CartProduct } from "./entities/cartProduct.entity";
 import { UpdateCartDto } from "./dto/update-cart.dto";
+import { RedisService } from "src/redis/redis.service";
 
 @Injectable()
 export class CartService {
@@ -14,8 +15,17 @@ export class CartService {
     @InjectRepository(Cart) private readonly cartRepository: Repository<Cart>,
     @InjectRepository(CartProduct) private readonly cartProductRepository: Repository<CartProduct>,
     @InjectRepository(Product) private readonly productRepository: Repository<Product>,
-    private readonly dataSource:DataSource
+    private readonly dataSource:DataSource,
+    private readonly redisService:RedisService
   ) {}
+
+  private async getCartFromCache(userId:number) {
+    const cartData = await this.redisService.client.get(`cart:${userId}`)
+    return cartData ? JSON.parse(cartData) : null
+  }
+  private async saveCartToCache(userId:number,cart:Cart) {
+    await this.redisService.client.set(`cart:${userId}`, JSON.stringify(cart), 'EX', 3600); 
+  }
 
   // Cập nhật số lượng sản phẩm trong giỏ hàng
   async updateCartQuantity(userId: number, productData: { productId: number; quantity: number }) {
@@ -45,6 +55,7 @@ export class CartService {
         priceAtTheTime: product.product_price,
       });
       await this.cartProductRepository.save(newCartProduct);
+      existingCart.cartProducts.push(newCartProduct)
     } else {
       // Cập nhật số lượng sản phẩm
       if (existingCartProduct.quantity + quantity > existingCartProduct.product.product_quantity)
@@ -52,6 +63,7 @@ export class CartService {
       existingCartProduct.quantity += quantity;
       await this.cartProductRepository.save(existingCartProduct);
     }
+    await this.saveCartToCache(userId,existingCart)
 
     // Trả về giỏ hàng đã cập nhật
     return this.cartRepository.findOne({
@@ -64,12 +76,10 @@ export class CartService {
   async createCart(userId: number, productData: { productId: number; quantity: number }) {
     const { productId, quantity } = productData;
 
-    // Kiểm tra sản phẩm tồn tại
     const product = await this.productRepository.findOneBy({ id: productId });
     if (!product) throw new NotFound();
     if (product.product_quantity < quantity) throw new Error('Not enough stock');
 
-    // Tạo giỏ hàng mới
     const newCart = this.cartRepository.create({
       user: { id: userId },
       cart_state: CartItemStatus.C1,
@@ -77,7 +87,6 @@ export class CartService {
     });
     const savedCart = await this.cartRepository.save(newCart);
 
-    // Thêm sản phẩm vào giỏ hàng
     const newCartProduct = this.cartProductRepository.create({
       cart: savedCart,
       product,
@@ -85,8 +94,7 @@ export class CartService {
       priceAtTheTime: product.product_price,
     });
     await this.cartProductRepository.save(newCartProduct);
-
-    // Trả về giỏ hàng đã tạo
+    await this.saveCartToCache(userId,savedCart)
     return this.cartRepository.findOne({
       where: { id: savedCart.id },
       relations: ['cartProducts', 'cartProducts.product'],
@@ -189,7 +197,7 @@ export class CartService {
         message: 'Cart updated successfully', 
         cartProduct, 
         cart 
-      }; // Trả về kết quả
+      }; 
     } catch (error) {
       await queryRunner.rollbackTransaction();
       console.error('Error updating cart:', error.message);
