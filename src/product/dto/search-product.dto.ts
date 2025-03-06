@@ -1,34 +1,31 @@
-// src/product/dto/search-product.dto.ts
-import { IsOptional, IsString, IsEnum, IsNumber, Min, Max } from 'class-validator';
-import { ProductType } from 'src/util/common/product.type.enum';
+import { Type } from "class-transformer";
+import { IsArray, IsInt, IsObject, IsOptional, IsString, Matches, Min } from "class-validator";
 
-export class SearchProductDto {
-  @IsOptional()
-  @IsString()
-  product_name?: string;
+export class findProductDto {
+    @IsOptional()
+    @IsInt()
+    @Min(1, { message: 'Limit must be at least 1' })
+    @Type(() => Number)
+    limit?: number = 10;
+  
+    @IsOptional()
+    @IsInt()
+    @Min(1, { message: 'Page must be at least 1' })
+    @Type(() => Number)
+    page?: number = 1;
+  
+    @IsOptional()
+    @IsString()
+    @Matches(/^[a-zA-Z0-9_.]+:(asc|desc)(,[a-zA-Z0-9_.]+:(asc|desc))*$/, {
+      message: 'Sort format must be field:asc or field:desc (multiple fields separated by commas)',
+    })
+    sort?: string = 'createdAt:desc';
+  
+    @IsOptional()
+    @IsObject({ message: 'Filters must be a valid object' })
+    filters?: Record<string, any>;
 
-  @IsOptional()
-  @IsEnum(ProductType)
-  product_type?: ProductType;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  min_price?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  max_price?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(1)
-  page?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(1)
-  @Max(100)
-  limit?: number;
-}
+    @IsOptional()
+    @IsArray()
+    lastHitSort?: any[];
+  }
