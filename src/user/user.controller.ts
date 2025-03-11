@@ -8,10 +8,10 @@ import { updateUserDto } from './dtos/update-user.dto';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { Ctx, RmqContext } from '@nestjs/microservices';
 import { FindUserDto } from './dtos/searchUser.dto';
-import { AuthorizeRoles } from 'src/util/decorators/authorize.roles.decorator';
 import { Roles } from 'src/util/common/user.role.enum';
 import { AuthorizeGuard } from 'src/util/guard/authorization.guard';
 import { AuthenticationGuard } from 'src/util/guard/authentication.guard';
+import { AuthorizeRoles } from 'src/util/decorators/authorize-role.decorator';
 
 @Controller('user')
 export class UserController {

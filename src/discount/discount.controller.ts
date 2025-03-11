@@ -5,14 +5,29 @@ import { UpdateDiscountDto } from './dto/update-discount.dto';
 import { Discount } from './entities/discount.entity';
 import { CacheInterceptor } from '@nestjs/cache-manager';
 import { BadRequest, NotFound } from 'src/util/handleError/handleError';
+import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 
 @Controller('discount')
 export class DiscountController {
-  constructor(private readonly discountService: DiscountService) {}
+  constructor(
+    private readonly discountService: DiscountService,
+    private readonly amqpConnection:AmqpConnection
+
+  ) {}
 
   @Post('create')
-  async createDiscountCode(@Body() payload:CreateDiscountDto):Promise<Discount> {
-    return this.discountService.createDiscountCode(payload)
+  async createDiscountCode(@Body() payload: CreateDiscountDto) {
+    try {
+      const res = await this.amqpConnection.request({
+        exchange: 'discount_exchange',
+        routingKey: 'discount_create',
+        payload: payload
+      });
+      console.log('Received response from discount service:', res);
+      return res;
+    } catch (error) {
+      throw new BadRequestException('Failed to create discount: ' + error.message);
+    }
   }
   @Patch(':id')
   async updateDiscount(

@@ -47,7 +47,7 @@ export class AppModule {
   configure(consumer: MiddlewareConsumer) {
     consumer
      .apply(CurrentUserMiddleware)
-     .forRoutes({path:'*',method:RequestMethod.ALL})
+     .forRoutes('*')
     consumer
     .apply(checkApiKeyMiddleware)
     .forRoutes('*')

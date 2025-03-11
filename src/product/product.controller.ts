@@ -1,4 +1,4 @@
-import { BadGatewayException, BadRequestException, Body, Controller, Delete, Get, InternalServerErrorException, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, Body, Controller, Delete, Get, InternalServerErrorException, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { CreateProductDto } from './dto/create-product.dto.js';
 import { ProductType } from 'src/util/common/product.type.enum.js';
 import { ProductService } from './product.service.js';
@@ -12,6 +12,10 @@ import { UpdateStatusProductDto } from './dto/update-productStatus.dto.js';
 import { Product } from './entities/product.entity.js';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { findProductDto } from './dto/search-product.dto.js';
+import { AuthenticationGuard } from '../util/guard/authentication.guard.js'
+import { AuthorizeGuard } from '../util/guard/authorization.guard.js'
+import { AuthorizeRoles } from 'src/util/decorators/authorize-role.decorator.js';
+import { Roles } from 'src/util/common/user.role.enum.js';
 
 @Controller('products')
 export class ProductController {
@@ -22,6 +26,8 @@ export class ProductController {
   ){}
  
   @Post('create')
+  // @AuthorizeRoles(Roles.USER)
+  @UseGuards(AuthenticationGuard, AuthorizeGuard)
   async createProduct(@Body()createProductDto:CreateProductDto) {
     const res =  await this.amqpConnection.request({
       exchange:'product_exchange',
@@ -48,8 +54,13 @@ export class ProductController {
     }
   }
   @Delete(':id')
-  async deleteProduct(@Param('id', ParseIntPipe) id: number): Promise<{ message: string }> {
-    return await this.productService.deleteProduct(id);
+  async deleteProduct(@Param('id', ParseIntPipe) id: number) {
+    const res = await this.amqpConnection.request({
+      exchange:"product_exchange",
+      routingKey:'product_delete',
+      payload:{id}
+    })
+    return res
   }
   @Post(':id/status')
   async updateStatus(@Param('id') id:string,@Body() updateStatusProductDto:UpdateStatusProductDto) {
@@ -92,7 +103,7 @@ export class ProductController {
     } catch (error) {
         throw new BadRequestException('Failed to fetch products from RabbitMQ');
     }
-}
+  }
 
   
 
