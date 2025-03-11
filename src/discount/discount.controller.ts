@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, BadRequestException, UseInterceptors } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, BadRequestException, UseInterceptors, InternalServerErrorException } from '@nestjs/common';
 import { DiscountService } from './discount.service';
 import { CreateDiscountDto } from './dto/create-discount.dto';
 import { UpdateDiscountDto } from './dto/update-discount.dto';
@@ -52,25 +52,38 @@ export class DiscountController {
    }
   }
   @Get('product')
-  @UseInterceptors(CacheInterceptor)
   async getAllDiscountCodesWithProduct(
     @Query('code') code: string,
     @Query('userId') userId: number,
     @Query('limit') limit: string,
     @Query('page') page: string,
   ) {
-    if(!code || !userId) {
-      throw new BadRequestException('Code and userId are required')
+    console.log('🔍 API Gateway nhận request:', { code, userId, limit, page });
+  
+    if (!code || !userId) {
+      throw new BadRequestException('Code and userId are required');
     }
-    const limitValue = limit ? parseInt(limit,10) : 10
-    const pageValue = page ? parseInt(limit,10) : 1
-    const products = await this.discountService.getAllDiscountCodeWithProduct({code,userId,limit:limitValue,page:pageValue})
-    return {
-      success:true,
-      metadata:products,
-      
+  
+    const limitValue = limit ? parseInt(limit, 10) : 10;
+    const pageValue = page ? parseInt(page, 10) : 1;
+  
+    try {
+      console.log('📡 Gửi request tới RabbitMQ...');
+      const product = await this.amqpConnection.request({
+        exchange: 'discount_exchange',
+        routingKey: 'discount_getallWithProduct',
+        payload: { code, userId, limit: limitValue, page: pageValue },
+        timeout: 100000,
+      });
+  
+      console.log('✅ API Gateway nhận response từ RabbitMQ:', product);
+      return { success: true, metadata: product };
+    } catch (error) {
+      console.error('❌ Lỗi khi gửi request tới RabbitMQ:', error.message);
+      throw new InternalServerErrorException('Lỗi khi lấy dữ liệu discount');
     }
   }
+  
   @Post('amount')
   async getDiscountAmount(
     @Body() body: { codeId: string; userId: number; products: { id: number; quantity: number; price: number }[] }
