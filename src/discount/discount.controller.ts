@@ -33,8 +33,23 @@ export class DiscountController {
   async updateDiscount(
     @Param('id') discountId: number,
     @Body() payload: CreateDiscountDto,
-  ):Promise<Discount> {
-    return this.discountService.updateDiscount(discountId, payload);
+  ){
+   try {
+    const res = await this.amqpConnection.request({
+      exchange:'discount_exchange',
+      routingKey:'discount_update',
+      payload: {
+        discountId,
+        payloadDiscount: payload
+      }
+    })
+    console.log('Received response from discount service:', res);
+    return res;
+    
+   } catch (error) {
+    throw new BadRequestException('Failed to create discount: ' + error.message);
+    
+   }
   }
   @Get('product')
   @UseInterceptors(CacheInterceptor)
